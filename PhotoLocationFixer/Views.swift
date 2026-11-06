@@ -49,6 +49,7 @@ struct ThumbnailList: View {
                     VStack(alignment: .leading) {
                         Text(entry.date, format: .dateTime.year().month().day())
                         Text(entry.date, format: .dateTime.hour().minute())
+//                        Text(library.filename(at: index))
                         if entry.location == nil {
                             Text("No location")
                                 .foregroundStyle(.secondary)

@@ -95,9 +95,9 @@ struct ContentView: View {
     }
 
     private func summary(index: Int, location: Coord?, cluster: Cluster?) -> String {
-        var lines = ["\(index + 1) of \(library.entries.count)"]
+        var lines = ["\(index + 1) of \(library.entries.count)", library.filename(at: index)]
         guard let location else {
-            return lines[0] + "\nNo location"
+            return (lines + ["No location"]).joined(separator: "\n")
         }
         lines.append(String(format: "%.4f, %.4f", location.lat, location.lon))
         if let cluster {

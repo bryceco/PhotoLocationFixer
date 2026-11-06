@@ -104,6 +104,13 @@ struct Cluster {
         assets.object(at: index)
     }
 
+    /// The name the photo's file had when it was added to the library.
+    func filename(at index: Int) -> String {
+        let resources = PHAssetResource.assetResources(for: asset(at: index))
+        let original = resources.first { $0.type == .photo } ?? resources.first
+        return original?.originalFilename ?? "No filename"
+    }
+
     // MARK: Navigation
 
     /// Select the next photo (in `direction`, +1 or -1) for which `test` is true.
