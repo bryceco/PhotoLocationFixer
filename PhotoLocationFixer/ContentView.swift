@@ -4,6 +4,9 @@ struct ContentView: View {
     @State private var library = Library()
     @State private var worldMap = true
     @AppStorage("skipDistanceKm") private var skipKm = 100.0
+    @AppStorage("batchKm") private var batchKm = 100.0
+    @AppStorage("batchHours") private var batchHours = 24.0
+    @State private var batch: [Int]?
 
     var body: some View {
         Group {
@@ -18,6 +21,18 @@ struct ContentView: View {
         }
         .frame(minWidth: 900, minHeight: 500)
         .task { await library.load() }
+        .confirmationDialog("Flip \(batch?.count ?? 0) photos?",
+                            isPresented: Binding(get: { batch != nil }, set: { if !$0 { batch = nil } }),
+                            titleVisibility: .visible)
+        {
+            Button("Flip Longitude of \(batch?.count ?? 0) Photos") {
+                if let batch {
+                    Task { await library.flip(batch) }
+                }
+            }
+        } message: {
+            Text("Every photo within \(batchKm.formatted()) km and \(batchHours.formatted()) hours of the selected photo will have its longitude reversed. Each change is logged and can be flipped back.")
+        }
         .alert("Couldn't Change Photo",
                isPresented: Binding(get: { library.errorMessage != nil },
                                     set: { if !$0 { library.errorMessage = nil } }))
@@ -84,6 +99,19 @@ struct ContentView: View {
                 .keyboardShortcut("f", modifiers: [.command, .shift])
                 .disabled(location == nil)
                 .help("Reverse this photo's longitude in the Photos library; do it again to undo (⇧⌘F)")
+                Button("Flip Nearby Photos…", systemImage: "arrow.left.arrow.right.square") {
+                    batch = library.nearbySelected(km: batchKm, hours: batchHours)
+                }
+                .disabled(location == nil)
+                .help("Reverse the longitude of every photo within the distance and time below of this photo, after confirming")
+                TextField("km", value: $batchKm, format: .number)
+                    .frame(width: 50)
+                    .help("Batch flip: distance from the selected photo, in kilometers")
+                Text("km")
+                TextField("hours", value: $batchHours, format: .number)
+                    .frame(width: 40)
+                    .help("Batch flip: time from the selected photo, in hours")
+                Text("h")
                 Picker("Map", selection: $worldMap) {
                     Text("World").tag(true)
                     Text("Zoomed").tag(false)

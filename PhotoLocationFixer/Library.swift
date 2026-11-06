@@ -182,31 +182,71 @@ struct Cluster {
 
     // MARK: Editing
 
+    /// The selected photo and every located photo within `km` and `hours` of it.
+    func nearbySelected(km: Double, hours: Double) -> [Int] {
+        guard let index = selection, let origin = entries[index].location else { return [] }
+        let date = entries[index].date
+        var result: [Int] = []
+        for direction in [-1, 1] {
+            var i = index + direction
+            while entries.indices.contains(i),
+                  abs(entries[i].date.timeIntervalSince(date)) <= hours * 3600
+            {
+                if let location = entries[i].location, location.km(to: origin) <= km {
+                    result.append(i)
+                }
+                i += direction
+            }
+        }
+        return [index] + result
+    }
+
     /// Reverse the longitude of the selected photo in the Photos library.
     func flipSelected() async {
-        guard let index = selection,
-              let location = entries[index].location,
-              let asset = PHAsset.fetchAssets(withLocalIdentifiers: [entries[index].id], options: nil).firstObject
-        else { return }
-        guard asset.canPerform(.properties) else {
-            errorMessage = "Photos doesn't allow this photo to be changed."
-            return
+        if let index = selection {
+            await flip([index])
         }
-        let old = asset.location
-        let new = CLLocation(coordinate: location.mirror.cl,
-                             altitude: old?.altitude ?? 0,
-                             horizontalAccuracy: old?.horizontalAccuracy ?? 0,
-                             verticalAccuracy: old?.verticalAccuracy ?? -1,
-                             timestamp: old?.timestamp ?? entries[index].date)
+    }
+
+    /// Reverse the longitude of these photos in the Photos library, as one change.
+    func flip(_ indices: [Int]) async {
+        let ids = indices.map { entries[$0].id }
+        let fetched = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
+        var assets: [String: PHAsset] = [:]
+        fetched.enumerateObjects { asset, _, _ in assets[asset.localIdentifier] = asset }
+
+        var changes: [(index: Int, asset: PHAsset, new: CLLocation)] = []
+        for index in indices {
+            guard let location = entries[index].location, let asset = assets[entries[index].id] else { continue }
+            guard asset.canPerform(.properties) else {
+                errorMessage = "Photos doesn't allow photo \(index + 1) to be changed. Nothing was changed."
+                return
+            }
+            let old = asset.location
+            changes.append((index, asset, CLLocation(coordinate: location.mirror.cl,
+                                                     altitude: old?.altitude ?? 0,
+                                                     horizontalAccuracy: old?.horizontalAccuracy ?? 0,
+                                                     verticalAccuracy: old?.verticalAccuracy ?? -1,
+                                                     timestamp: old?.timestamp ?? entries[index].date)))
+        }
         do {
             try await PHPhotoLibrary.shared().performChanges {
-                PHAssetChangeRequest(for: asset).location = new
+                for change in changes {
+                    PHAssetChangeRequest(for: change.asset).location = change.new
+                }
             }
-            entries[index].location = location.mirror
-            log("\(Date().ISO8601Format())\t\(entries[index].id)\t\(location.lat)\t\(location.lon)\t\(location.lat)\t\(-location.lon)\n")
         } catch {
             errorMessage = error.localizedDescription
+            return
         }
+        let stamp = Date().ISO8601Format()
+        var lines = ""
+        for change in changes {
+            let location = entries[change.index].location!
+            entries[change.index].location = location.mirror
+            lines += "\(stamp)\t\(entries[change.index].id)\t\(location.lat)\t\(location.lon)\t\(location.lat)\t\(-location.lon)\n"
+        }
+        log(lines)
     }
 
     /// Append to the record of every change made: time, photo, old lat/lon, new lat/lon.
