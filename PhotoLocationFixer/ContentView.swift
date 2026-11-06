@@ -44,32 +44,38 @@ struct ContentView: View {
                 }
             }
             .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
-            PhotoMap(location: location, cluster: cluster, world: worldMap)
+            PhotoMap(location: location, cluster: cluster, world: worldMap, longJumpKm: skipKm)
                 .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
         }
+        .onChange(of: library.selection) { library.saveSelection() }
         .toolbar {
             ToolbarItemGroup {
                 Button("Previous Distant Photo", systemImage: "backward.end") {
                     library.skip(-1, beyondKm: skipKm)
                 }
                 .keyboardShortcut(.leftArrow, modifiers: .command)
+                .help("Go back to the previous photo more than this distance from the current one (⌘←)")
                 TextField("Distance", value: $skipKm, format: .number)
                     .frame(width: 60)
+                    .help("How far away, in kilometers, a photo must be for the skip buttons to stop at it")
                 Text("km")
                 Button("Next Distant Photo", systemImage: "forward.end") {
                     library.skip(1, beyondKm: skipKm)
                 }
                 .keyboardShortcut(.rightArrow, modifiers: .command)
+                .help("Go forward to the next photo more than this distance from the current one (⌘→)")
             }
             ToolbarItemGroup {
                 Button("Previous Suspect", systemImage: "exclamationmark.arrow.triangle.2.circlepath") {
                     library.skipToSuspect(-1)
                 }
                 .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+                .help("Go back to the previous photo that is outside its circle while its mirror is inside (⌥⌘←)")
                 Button("Next Suspect", systemImage: "exclamationmark.triangle") {
                     library.skipToSuspect(1)
                 }
                 .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+                .help("Go forward to the next photo that is outside its circle while its mirror is inside (⌥⌘→)")
             }
             ToolbarItemGroup {
                 Button("Flip Longitude", systemImage: "arrow.left.arrow.right") {
@@ -77,11 +83,13 @@ struct ContentView: View {
                 }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
                 .disabled(location == nil)
+                .help("Reverse this photo's longitude in the Photos library; do it again to undo (⇧⌘F)")
                 Picker("Map", selection: $worldMap) {
                     Text("World").tag(true)
                     Text("Zoomed").tag(false)
                 }
                 .pickerStyle(.segmented)
+                .help("World shows the photo and its mirror on the whole map; Zoomed follows the photo at the zoom you choose")
             }
         }
     }

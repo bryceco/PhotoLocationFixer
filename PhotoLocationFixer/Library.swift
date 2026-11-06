@@ -68,7 +68,21 @@ struct Cluster {
         assets = loaded.assets
         entries = loaded.entries
         selection = entries.isEmpty ? nil : 0
+        if let saved = UserDefaults.standard.object(forKey: Self.selectionKey) as! Double? {
+            let date = Date(timeIntervalSinceReferenceDate: saved)
+            selection = entries.firstIndex { $0.date >= date } ?? selection
+        }
         state = .ready
+    }
+
+    private static let selectionKey = "selectedPhotoDate"
+
+    /// Remember the selected photo, by its date, for the next launch.
+    func saveSelection() {
+        if let selection {
+            UserDefaults.standard.set(entries[selection].date.timeIntervalSinceReferenceDate,
+                                      forKey: Self.selectionKey)
+        }
     }
 
     private nonisolated static func buildIndex() -> Loaded {
