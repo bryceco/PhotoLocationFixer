@@ -249,11 +249,108 @@ struct Cluster {
         log(lines)
     }
 
+    // MARK: Date repair
+
+    /// A JPG whose date should be copied from the HEIC it was made from.
+    nonisolated struct DateFix: Sendable {
+        let id: String
+        let name: String
+        let from: Date
+        let to: Date
+    }
+
+    /// Progress through the library while proposing date fixes, 0...1.
+    var dateScanProgress: Double?
+
+    /// Find JPGs that share a name with a HEIC taken up to `days` earlier.
+    /// Reads every photo's filename, which takes a while; progress is reported
+    /// in `dateScanProgress`. Also writes the proposals to date-fixes.tsv.
+    func proposeDateFixes(days: Double) async -> [DateFix] {
+        dateScanProgress = 0
+        let entries = entries
+        let assets = assets
+        let progress: @Sendable (Double) -> Void = { p in
+            Task { @MainActor in self.dateScanProgress = p }
+        }
+        let fixes = await Task.detached {
+            Self.findDateFixes(entries: entries, assets: assets, days: days, progress: progress)
+        }.value
+        dateScanProgress = nil
+        log(fixes.map { "\($0.id)\t\($0.name)\t\($0.from.ISO8601Format())\t\($0.to.ISO8601Format())\n" }.joined(),
+            to: "date-fixes.tsv", replace: true)
+        return fixes
+    }
+
+    private nonisolated static func findDateFixes(entries: [Entry], assets: PHFetchResult<PHAsset>,
+                                                  days: Double, progress: @Sendable (Double) -> Void) -> [DateFix]
+    {
+        var heics: [String: [Int]] = [:]  // base name -> indices, in date order
+        var jpgs: [(index: Int, base: String, name: String)] = []
+        for index in entries.indices {
+            if index % 1000 == 0 {
+                progress(Double(index) / Double(entries.count))
+            }
+            let resources = PHAssetResource.assetResources(for: assets.object(at: index))
+            guard let resource = resources.first(where: { $0.type == .photo }) ?? resources.first else { continue }
+            let name = resource.originalFilename as NSString
+            let base = name.deletingPathExtension.uppercased()
+            switch name.pathExtension.uppercased() {
+            case "HEIC": heics[base, default: []].append(index)
+            case "JPG", "JPEG": jpgs.append((index, base, name as String))
+            default: break
+            }
+        }
+        var fixes: [DateFix] = []
+        for jpg in jpgs {
+            let date = entries[jpg.index].date
+            let earlier = (heics[jpg.base] ?? []).filter {
+                let gap = date.timeIntervalSince(entries[$0].date)
+                return gap > 0 && gap <= days * 86400
+            }
+            // Two cameras share a numbering sequence, so insist on exactly one match.
+            guard earlier.count == 1 else { continue }
+            fixes.append(DateFix(id: entries[jpg.index].id, name: jpg.name,
+                                 from: date, to: entries[earlier[0]].date))
+        }
+        return fixes
+    }
+
+    /// Apply date fixes to the Photos library, then rebuild the index since the order changed.
+    func apply(_ fixes: [DateFix]) async {
+        let stamp = Date().ISO8601Format()
+        for chunk in stride(from: 0, to: fixes.count, by: 500).map({ Array(fixes[$0 ..< min($0 + 500, fixes.count)]) }) {
+            let fetched = PHAsset.fetchAssets(withLocalIdentifiers: chunk.map(\.id), options: nil)
+            var assets: [String: PHAsset] = [:]
+            fetched.enumerateObjects { asset, _, _ in assets[asset.localIdentifier] = asset }
+            do {
+                try await PHPhotoLibrary.shared().performChanges {
+                    for fix in chunk {
+                        if let asset = assets[fix.id], asset.canPerform(.properties) {
+                            PHAssetChangeRequest(for: asset).creationDate = fix.to
+                        }
+                    }
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+                break
+            }
+            log(chunk.map { "\(stamp)\t\($0.id)\t\($0.from.ISO8601Format())\t\($0.to.ISO8601Format())\n" }.joined(),
+                to: "date-changes.tsv")
+        }
+        saveSelection()
+        state = .loading
+        await load()
+    }
+
     /// Append to the record of every change made: time, photo, old lat/lon, new lat/lon.
-    private func log(_ line: String) {
+    private func log(_ line: String, to name: String = "changes.tsv", replace: Bool = false) {
         let dir = URL.applicationSupportDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let url = dir.appending(path: "changes.tsv")
+        let url = dir.appending(path: name)
+        if replace {
+            try? Data(line.utf8).write(to: url)
+            return
+        }
         if let handle = try? FileHandle(forWritingTo: url) {
             handle.seekToEndOfFile()
             handle.write(Data(line.utf8))

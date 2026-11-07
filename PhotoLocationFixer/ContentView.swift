@@ -7,6 +7,7 @@ struct ContentView: View {
     @AppStorage("batchKm") private var batchKm = 100.0
     @AppStorage("batchHours") private var batchHours = 24.0
     @State private var batch: [Int]?
+    @State private var dateFixes: [Library.DateFix]?
 
     var body: some View {
         Group {
@@ -16,7 +17,12 @@ struct ContentView: View {
             case .denied:
                 Text("Allow full access in System Settings > Privacy & Security > Photos, then relaunch.")
             case .ready:
-                browser
+                if let progress = library.dateScanProgress {
+                    ProgressView("Reading filenames…", value: progress)
+                        .frame(width: 300)
+                } else {
+                    browser
+                }
             }
         }
         .frame(minWidth: 900, minHeight: 500)
@@ -32,6 +38,18 @@ struct ContentView: View {
             }
         } message: {
             Text("Every photo within \(batchKm.formatted()) km and \(batchHours.formatted()) hours of the selected photo will have its longitude reversed. Each change is logged and can be flipped back.")
+        }
+        .confirmationDialog("Change the date of \(dateFixes?.count ?? 0) photos?",
+                            isPresented: Binding(get: { dateFixes != nil }, set: { if !$0 { dateFixes = nil } }),
+                            titleVisibility: .visible)
+        {
+            Button("Change \(dateFixes?.count ?? 0) Dates") {
+                if let dateFixes {
+                    Task { await library.apply(dateFixes) }
+                }
+            }
+        } message: {
+            Text("Each JPG that shares its name with exactly one HEIC taken up to a week earlier will take that HEIC's date. The full list is in date-fixes.tsv in this app's Application Support folder; review it before continuing. Old dates are logged to date-changes.tsv.")
         }
         .alert("Couldn't Change Photo",
                isPresented: Binding(get: { library.errorMessage != nil },
@@ -112,6 +130,10 @@ struct ContentView: View {
                     .frame(width: 40)
                     .help("Batch flip: time from the selected photo, in hours")
                 Text("h")
+                Button("Fix JPG Dates…", systemImage: "calendar.badge.clock") {
+                    Task { dateFixes = await library.proposeDateFixes(days: 7) }
+                }
+                .help("Find JPGs named like a HEIC taken up to a week earlier and give them that HEIC's date, after confirming. Reads every filename, which takes a while.")
                 Picker("Map", selection: $worldMap) {
                     Text("World").tag(true)
                     Text("Zoomed").tag(false)
